@@ -28,7 +28,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 🛡️ SNYK (robust + non-blocking)
+      # 🛡️ SNYK
+      - name: Install Snyk CLI
+        uses: snyk/actions/setup@v1
+
       - name: Snyk Security Scan
         timeout-minutes: 5
         continue-on-error: true
@@ -38,8 +41,7 @@ jobs:
             --file=requirements.txt \
             --package-manager=pip \
             --severity-threshold=high \
-            --skip-unresolved \
-            -d || echo "Snyk failed, continuing..."
+            --skip-unresolved || echo "Snyk failed, continuing..."
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 

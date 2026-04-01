@@ -1,5 +1,4 @@
-FROM fraud-base:latest
-
+FROM fraud-base:1.0.0
 WORKDIR /app
 
 COPY . .
