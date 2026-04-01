@@ -6,17 +6,15 @@ on:
     paths:
       - "src/training/**"
       - "docker/training.Dockerfile"
-      # Good practice to trigger training builds if dependencies change
-      - "requirements.txt" 
+      - "requirements.txt"
 
 jobs:
   build-secure-and-push:
     runs-on: ubuntu-latest
-
     permissions:
-      id-token: write        # REQUIRED for AWS OIDC
-      contents: read         # Training doesn't commit back to Git, so read is fine
-      security-events: write # REQUIRED for uploading scan results to GitHub Security tab
+      id-token: write
+      contents: read
+      security-events: write
 
     env:
       AWS_REGION: ap-south-1
@@ -27,11 +25,9 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 🛡️ 1. SNYK SCAN (Software Composition Analysis)
-      
+      - name: Nuke pyproject.toml for Snyk
         run: rm -f pyproject.toml || true
 
-      # 🛡️ 1. SNYK SCAN
       - name: Snyk Security Scan
         uses: snyk/actions/python@master
         env:
@@ -39,7 +35,6 @@ jobs:
         with:
           args: --file=requirements.txt --package-manager=pip --severity-threshold=high
 
-      # 🏗️ 2. CHECKOV SCAN (Infrastructure as Code)
       - name: Checkov IaC Scan
         uses: bridgecrewio/checkov-action@master
         with:
@@ -48,46 +43,39 @@ jobs:
           quiet: true
           skip_check: CKV_DOCKER_2,CKV_DOCKER_3
 
-      # 🔐 OIDC AUTH (NO SECRETS)
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/github-actions-role
           aws-region: ${{ env.AWS_REGION }}
 
-      # 🔑 ECR LOGIN
       - name: Login to ECR
         run: |
-          aws ecr get-login-password --region $AWS_REGION | docker login \
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login \
           --username AWS \
-          --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+          --password-stdin ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
-      # 🏷️ VERSION TAG
       - name: Set Image Tag
         id: vars
         run: |
           TAG=v1.0.${{ github.run_number }}
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
 
-      # 🐳 BUILD IMAGE (Local compilation only)
       - name: Build Image
         run: |
           docker build -f docker/training.Dockerfile \
-            -t ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }} .
+            -t ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}:${{ steps.vars.outputs.TAG }} .
 
-      # 🐳 3. TRIVY SCAN (Container Security)
-      # Blocks the push if the OS layer has critical vulnerabilities
       - name: Trivy Container Scan
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: '${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}:${{ steps.vars.outputs.TAG }}'
           format: 'table'
-          exit-code: '1' 
+          exit-code: '1'
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
 
-      # 🚀 PUSH IMAGE (Execution means Trivy passed)
       - name: Push Image
         run: |
-          docker push ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }}
+          docker push ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}:${{ steps.vars.outputs.TAG }}
