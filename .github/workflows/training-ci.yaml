@@ -80,7 +80,7 @@ jobs:
 
       # 🔍 TRIVY SCAN
       - name: Trivy Container Scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.20.0
         with:
           image-ref: '${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}:${{ steps.vars.outputs.TAG }}'
           format: table
