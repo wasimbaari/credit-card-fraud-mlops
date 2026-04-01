@@ -27,3 +27,4 @@ pytest==8.3.2
 fastapi
 uvicorn
 prometheus-client
+# trigger pipelines
