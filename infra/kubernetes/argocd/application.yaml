@@ -9,7 +9,7 @@ spec:
   source:
     repoURL: https://github.com/wasimbaari/credit-card-fraud-mlops.git
     targetRevision: HEAD
-    path: infra/kubernetes
+    path: infra/kubernetes/apps
 
   destination:
     server: https://kubernetes.default.svc
