@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-inference
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fraud-inference
+  template:
+    metadata:
+      labels:
+        app: fraud-inference
+    spec:
+      containers:
+        - name: fraud-inference
+          image: 734367008253.dkr.ecr.ap-south-1.amazonaws.com/fraud-inference:v1.0.8
+          ports:
+            - containerPort: 8000
