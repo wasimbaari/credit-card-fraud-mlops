@@ -28,12 +28,16 @@ jobs:
         uses: actions/checkout@v4
 
       # 🛡️ 1. SNYK SCAN (Software Composition Analysis)
+      
+        run: rm -f pyproject.toml || true
+
+      # 🛡️ 1. SNYK SCAN
       - name: Snyk Security Scan
         uses: snyk/actions/python@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --file=requirements.txt --severity-threshold=high
+          args: --file=requirements.txt --package-manager=pip --severity-threshold=high
 
       # 🏗️ 2. CHECKOV SCAN (Infrastructure as Code)
       - name: Checkov IaC Scan

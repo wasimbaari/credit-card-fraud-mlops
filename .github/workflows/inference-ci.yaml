@@ -26,14 +26,17 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 🛡️ 1. SNYK SCAN (Software Composition Analysis)
-      # Scans Python dependencies for known CVEs before building
+        # 🛡️ 1. SNYK SCAN (Software Composition Analysis)
+      - name: Nuke pyproject.toml for Snyk
+        run: rm -f pyproject.toml || true
+
+      # 🛡️ 1. SNYK SCAN
       - name: Snyk Security Scan
         uses: snyk/actions/python@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --file=requirements.txt --severity-threshold=high
+          args: --file=requirements.txt --package-manager=pip --severity-threshold=high
 
       # 🏗️ 2. CHECKOV SCAN (Infrastructure as Code)
       # Scans Dockerfile and Kubernetes YAMLs for misconfigurations
