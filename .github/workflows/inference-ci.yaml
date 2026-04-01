@@ -1,16 +1,18 @@
-name: Training Image Build (DevSecOps + OIDC)
+name: Inference Image Build (DevSecOps + OIDC)
 
 on:
   push:
     branches: [main]
     paths:
-      - "src/training/**"
-      - "docker/training.Dockerfile"
+      - "src/inference/**"
+      - "docker/inference.Dockerfile"
       - "requirements.txt"
+  workflow_dispatch:
 
 jobs:
   build-secure-and-push:
     runs-on: ubuntu-latest
+
     permissions:
       id-token: write
       contents: read
@@ -19,63 +21,75 @@ jobs:
     env:
       AWS_REGION: ap-south-1
       ACCOUNT_ID: "734367008253"
-      ECR_REPO: fraud-training
+      ECR_REPO: fraud-inference
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Nuke pyproject.toml for Snyk
-        run: rm -f pyproject.toml || true
+      # 🛡️ SNYK (FAST MODE)
+      - name: Install Snyk CLI
+        uses: snyk/actions/setup@v1
 
       - name: Snyk Security Scan
-        uses: snyk/actions/python@master
+        timeout-minutes: 5
+        run: |
+          snyk test \
+            --file=requirements.txt \
+            --package-manager=pip \
+            --severity-threshold=high \
+            --skip-unresolved
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --file=requirements.txt --package-manager=pip --severity-threshold=high
 
+      # 🏗️ CHECKOV
       - name: Checkov IaC Scan
-        uses: bridgecrewio/checkov-action@master
+        uses: bridgecrewio/checkov-action@v12
         with:
           directory: .
           framework: dockerfile
           quiet: true
           skip_check: CKV_DOCKER_2,CKV_DOCKER_3
 
+      # 🔐 AWS OIDC
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/github-actions-role
           aws-region: ${{ env.AWS_REGION }}
 
+      # 🔑 LOGIN
       - name: Login to ECR
         run: |
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login \
+          aws ecr get-login-password --region $AWS_REGION | docker login \
           --username AWS \
-          --password-stdin ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
 
+      # 🏷️ TAG
       - name: Set Image Tag
         id: vars
         run: |
           TAG=v1.0.${{ github.run_number }}
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
 
+      # 🐳 BUILD
       - name: Build Image
         run: |
-          docker build -f docker/training.Dockerfile \
-            -t ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}:${{ steps.vars.outputs.TAG }} .
+          docker build -f docker/inference.Dockerfile \
+            -t ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }} .
 
+      # 🔍 TRIVY
       - name: Trivy Container Scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: '${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}:${{ steps.vars.outputs.TAG }}'
-          format: 'table'
-          exit-code: '1'
+          format: table
+          exit-code: 1
           ignore-unfixed: true
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
 
+      # 🚀 PUSH
       - name: Push Image
         run: |
-          docker push ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}:${{ steps.vars.outputs.TAG }}
+          docker push ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }}
