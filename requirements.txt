@@ -28,3 +28,5 @@ fastapi
 uvicorn
 prometheus-client
 # trigger pipelines
+
+# final trigger test
