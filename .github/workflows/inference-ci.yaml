@@ -33,7 +33,7 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --severity-threshold=high
+          args: --file=requirements.txt --severity-threshold=high
 
       # 🏗️ 2. CHECKOV SCAN (Infrastructure as Code)
       # Scans Dockerfile and Kubernetes YAMLs for misconfigurations
