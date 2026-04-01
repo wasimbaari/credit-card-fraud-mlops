@@ -1,4 +1,4 @@
-name: Inference CI/CD (OIDC)
+name: Inference CI/CD (DevSecOps + OIDC)
 
 on:
   push:
@@ -9,21 +9,41 @@ on:
       - "requirements.txt"
 
 jobs:
-  build-and-deploy:
+  build-secure-and-deploy:
     runs-on: ubuntu-latest
 
     permissions:
-      id-token: write   # REQUIRED for OIDC
-      contents: write
+      id-token: write        # REQUIRED for AWS OIDC
+      contents: write        # REQUIRED for GitOps Commit
+      security-events: write # REQUIRED for uploading scan results to GitHub Security tab
 
     env:
       AWS_REGION: ap-south-1
       ECR_REPO: fraud-inference
-      ACCOUNT_ID: <ACCOUNT_ID>
+      ACCOUNT_ID: "734367008253"
 
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
+
+      # 🛡️ 1. SNYK SCAN (Software Composition Analysis)
+      # Scans Python dependencies for known CVEs before building
+      - name: Snyk Security Scan
+        uses: snyk/actions/python@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+      # 🏗️ 2. CHECKOV SCAN (Infrastructure as Code)
+      # Scans Dockerfile and Kubernetes YAMLs for misconfigurations
+      - name: Checkov IaC Scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: dockerfile,kubernetes
+          quiet: true # Only show failed checks
+          skip_check: CKV_DOCKER_2,CKV_DOCKER_3 # Skip overly strict healthcheck/user rules for standard ML builds
 
       # 🔐 OIDC AUTH (NO SECRETS)
       - name: Configure AWS Credentials
@@ -46,13 +66,25 @@ jobs:
           TAG=v1.0.${{ github.run_number }}
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
 
-      # 🐳 BUILD
+      # 🐳 BUILD IMAGE (Local only, not pushed yet!)
       - name: Build Image
         run: |
           docker build -f docker/inference.Dockerfile \
             -t ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }} .
 
-      # 🚀 PUSH
+      # 🐳 3. TRIVY SCAN (Container Security)
+      # Scans the compiled image OS layers. Kills pipeline if CRITICAL vulns exist.
+      - name: Trivy Container Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}:${{ steps.vars.outputs.TAG }}'
+          format: 'table'
+          exit-code: '1' # '1' strictly fails the build on vulnerabilities
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      # 🚀 PUSH IMAGE (Only executes if Trivy gives the green light)
       - name: Push Image
         run: |
           docker push ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }}
@@ -68,7 +100,5 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           git add .
-          git commit -m "ci: deploy inference ${{
-            steps.vars.outputs.TAG
-          }}" || echo "No changes"
+          git commit -m "ci: secure deploy inference ${{ steps.vars.outputs.TAG }}" || echo "No changes"
           git push
