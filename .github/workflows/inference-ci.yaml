@@ -1,0 +1,74 @@
+name: Inference CI/CD (OIDC)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/inference/**"
+      - "docker/inference.Dockerfile"
+      - "requirements.txt"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write   # REQUIRED for OIDC
+      contents: write
+
+    env:
+      AWS_REGION: ap-south-1
+      ECR_REPO: fraud-inference
+      ACCOUNT_ID: <ACCOUNT_ID>
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 🔐 OIDC AUTH (NO SECRETS)
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 🔑 ECR LOGIN
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | docker login \
+          --username AWS \
+          --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+
+      # 🏷️ VERSION TAG
+      - name: Set Image Tag
+        id: vars
+        run: |
+          TAG=v1.0.${{ github.run_number }}
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+
+      # 🐳 BUILD
+      - name: Build Image
+        run: |
+          docker build -f docker/inference.Dockerfile \
+            -t ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }} .
+
+      # 🚀 PUSH
+      - name: Push Image
+        run: |
+          docker push ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }}
+
+      # 🔄 UPDATE MANIFEST
+      - name: Update KServe Manifest
+        run: |
+          sed -i "s|image: .*|image: ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }}|g" infra/kubernetes/kserve/inference-service.yaml
+
+      # 📦 COMMIT BACK (GITOPS)
+      - name: Commit Changes
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add .
+          git commit -m "ci: deploy inference ${{
+            steps.vars.outputs.TAG
+          }}" || echo "No changes"
+          git push

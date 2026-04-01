@@ -1,0 +1,44 @@
+name: Training Image Build (OIDC)
+
+on:
+  push:
+    paths:
+      - "src/training/**"
+      - "docker/training.Dockerfile"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      AWS_REGION: ap-south-1
+      ACCOUNT_ID: <ACCOUNT_ID>
+      ECR_REPO: fraud-training
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | docker login \
+          --username AWS \
+          --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+
+      - name: Build
+        run: |
+          docker build -f docker/training.Dockerfile \
+            -t ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:v1.0.${{ github.run_number }} .
+
+      - name: Push
+        run: |
+          docker push ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:v1.0.${{ github.run_number }}

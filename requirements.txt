@@ -1,0 +1,29 @@
+# Core
+pandas==2.2.2
+numpy==1.26.4
+
+# ML
+scikit-learn==1.5.1
+xgboost==2.1.1
+imbalanced-learn==0.12.3
+
+# Model saving
+joblib==1.4.2
+
+# MLOps
+dvc[s3]==3.51.2
+mlflow==2.14.1
+
+# Config & utils
+pyyaml==6.0.2
+python-dotenv==1.0.1
+
+# Logging & CLI (optional but recommended)
+loguru==0.7.2
+click==8.1.7
+
+# Dev
+pytest==8.3.2
+fastapi
+uvicorn
+prometheus-client

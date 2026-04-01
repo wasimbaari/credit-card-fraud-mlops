@@ -205,3 +205,53 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+# Ignore the actual data files
+/data/external/*
+/data/raw/*
+
+# But DO NOT ignore the .dvc pointer files or .gitignore files
+!/data/external/*.dvc
+!/data/external/.gitignore
+!/data/raw/*.dvc
+!/data/raw/.gitignore
+venv/
+__pycache__/
+*.pyc
+.env
+models/
+mlruns/
+/data/raw/
+/data/processed/
+/models/
+# BUT don't ignore the .dvc files or the .gitkeeps
+!/data/raw/.gitignore
+!/data/processed/.gitignore
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# DVC
+/data/*
+!/data/.gitkeep
+
+# Models
+models/
+
+# MLflow
+mlruns/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Logs
+logs/
+
+# Env
+.env
+pyproject.toml
+setup_project.toml*.csv
+data/external/*.csv
+data/raw/*.csv
