@@ -14,10 +14,14 @@ WORKDIR /app
 # ---- Copy requirements first (layer caching) ----
 COPY requirements.txt .
 
+# ---- Install dependencies ----
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ---- Copy project files ----
-COPY . .
+# ---- Copy application code ----
+COPY src/ ./src/
+
+# ---- Copy model file explicitly (CRITICAL FIX) ----
+COPY model.joblib /app/model.joblib
 
 # ---- Fix permissions for non-root ----
 RUN chown -R appuser:appuser /app
@@ -27,6 +31,7 @@ USER appuser
 
 # ---- Environment ----
 ENV PYTHONPATH=/app
+ENV MODEL_PATH=/app/model.joblib
 
 # ---- Expose port ----
 EXPOSE 8080

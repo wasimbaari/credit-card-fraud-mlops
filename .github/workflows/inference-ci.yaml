@@ -103,4 +103,3 @@ jobs:
       - name: Print Image Info
         run: |
           echo "✅ Image pushed:"
-          echo "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }}"
