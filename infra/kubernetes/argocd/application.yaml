@@ -1,8 +1,23 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
+
 metadata:
   name: fraud-mlops
   namespace: argocd
+
+  annotations:
+    # 🔥 ArgoCD Image Updater config
+    argocd-image-updater.argoproj.io/image-list: fraud=734367008253.dkr.ecr.ap-south-1.amazonaws.com/fraud-inference
+    
+    # ✅ Use semver (NOT latest)
+    argocd-image-updater.argoproj.io/fraud.update-strategy: semver
+    
+    # ✅ Only allow versioned tags like v1.0.12
+    argocd-image-updater.argoproj.io/fraud.allow-tags: regexp:^v[0-9]+\.[0-9]+\.[0-9]+$
+
+    # 🔥 Write-back to Git (IMPORTANT)
+    argocd-image-updater.argoproj.io/write-back-method: git
+
 spec:
   project: default
 
