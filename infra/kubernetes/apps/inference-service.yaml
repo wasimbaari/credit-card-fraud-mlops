@@ -10,7 +10,7 @@ spec:
     containers:
       - name: kserve-container
         # Keep the LATEST tag the bot created (or yours, the CI will update it again anyway)
-        image: 734367008253.dkr.ecr.ap-south-1.amazonaws.com/fraud-inference:v1.0.14
+        image: 734367008253.dkr.ecr.ap-south-1.amazonaws.com/fraud-inference:v1.0.11
         ports:
           - containerPort: 8080
             protocol: TCP
