@@ -2,25 +2,18 @@ apiVersion: "serving.kserve.io/v1beta1"
 kind: "InferenceService"
 metadata:
   name: "fraud-detection"
-  annotations:
-    serving.kserve.io/deploymentMode: Serverless
+  namespace: default
 spec:
   predictor:
     serviceAccountName: fraud-service-account
+    # Path to the S3 FOLDER (KServe will look for model.joblib inside it)
+    storageUri: "s3://credit-card-fraud-mlops-bucket/model/" 
     containers:
       - name: kserve-container
-        # The CI pipeline will automatically update this tag
         image: 734367008253.dkr.ecr.ap-south-1.amazonaws.com/fraud-inference:v1.0.12
-        ports:
-          - containerPort: 8080
-            protocol: TCP
         env:
           - name: MODEL_PATH
             value: "/mnt/models/model.joblib"
-        resources:
-          requests:
-            cpu: "100m"
-            memory: "512Mi"
-          limits:
-            cpu: "500m"
-            memory: "1Gi"
+        ports:
+          - containerPort: 8080
+            protocol: TCP
