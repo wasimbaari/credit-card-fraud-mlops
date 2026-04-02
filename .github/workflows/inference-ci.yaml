@@ -1,22 +1,20 @@
-name: Inference Image Build (DevSecOps + OIDC)
+name: Inference Image Build (DevSecOps + OIDC + ArgoCD)
 
 on:
   push:
     branches: [main]
     paths:
       - "src/inference/**"
-      - "docker/inference.Dockerfile"
+      - "infra/kubernetes/apps/**"
       - "requirements.txt"
-      - ".github/workflows/**"
   workflow_dispatch:
 
 jobs:
   build-secure-and-push:
     runs-on: ubuntu-latest
-
     permissions:
       id-token: write
-      contents: read
+      contents: write 
       security-events: write
 
     env:
@@ -27,25 +25,21 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # 🛡️ SNYK
+      # 🛡️ 1. SNYK (Dependencies)
       - name: Install Snyk CLI
         uses: snyk/actions/setup@v1
-
       - name: Snyk Security Scan
         timeout-minutes: 5
         continue-on-error: true
         run: |
-          echo "Running Snyk scan..."
-          snyk test \
-            --file=requirements.txt \
-            --package-manager=pip \
-            --severity-threshold=high \
-            --skip-unresolved || echo "Snyk failed, continuing..."
+          snyk test --file=requirements.txt --package-manager=pip --severity-threshold=high --skip-unresolved
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      # 🏗️ CHECKOV
+      # 🏗️ 2. CHECKOV (Dockerfile IaC)
       - name: Checkov IaC Scan
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -54,34 +48,29 @@ jobs:
           quiet: true
           skip_check: CKV_DOCKER_2,CKV_DOCKER_3
 
-      # 🔐 AWS OIDC
+      # 🔐 3. AWS OIDC AUTH
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/github-actions-role
           aws-region: ${{ env.AWS_REGION }}
 
-      # 🔑 LOGIN
+      # 🔑 4. LOGIN & BUILD
       - name: Login to ECR
         run: |
           aws ecr get-login-password --region $AWS_REGION | docker login \
-          --username AWS \
-          --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+          --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
 
-      # 🏷️ TAG
       - name: Set Image Tag
         id: vars
-        run: |
-          TAG=v1.0.${{ github.run_number }}
-          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+        run: echo "TAG=v1.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
 
-      # 🐳 BUILD
       - name: Build Image
         run: |
           docker build -f docker/inference.Dockerfile \
             -t ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }} .
 
-      # 🔍 TRIVY (non-blocking for dev)
+      # 🔍 5. TRIVY (Container Image Scan)
       - name: Trivy Container Scan
         uses: aquasecurity/trivy-action@v0.20.0
         with:
@@ -92,7 +81,20 @@ jobs:
           vuln-type: os,library
           severity: CRITICAL,HIGH
 
-      # 🚀 PUSH
+      # 🚀 6. PUSH
       - name: Push Image
         run: |
           docker push ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }}
+
+      # 🎡 7. GITOPS UPDATE (For ArgoCD)
+      - name: Update Manifest for ArgoCD
+        run: |
+          # Updating the manifest in the apps folder that ArgoCD watches
+          sed -i "s|image:.*|image: ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }}|g" infra/kubernetes/apps/inference-service.yaml
+          
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add infra/kubernetes/apps/inference-service.yaml
+          git commit -m "chore: deploy version ${{ steps.vars.outputs.TAG }} [skip ci]"
+          git push

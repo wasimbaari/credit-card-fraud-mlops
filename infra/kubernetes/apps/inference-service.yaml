@@ -1,12 +1,25 @@
-apiVersion: v1
-kind: Service
+apiVersion: "serving.kserve.io/v1beta1"
+kind: "InferenceService"
 metadata:
-  name: fraud-inference-service
+  name: "fraud-detection"
   namespace: default
 spec:
-  type: LoadBalancer
-  selector:
-    app: fraud-inference
-  ports:
-    - port: 80
-      targetPort: 8000
+  predictor:
+    serviceAccountName: fraud-service-account
+    containers:
+      - name: kserve-container
+        # The CI pipeline below will automatically update this v1.0.X tag
+        image: 734367008253.dkr.ecr.ap-south-1.amazonaws.com/fraud-inference:v1.0.12
+        ports:
+          - containerPort: 8080
+            protocol: TCP
+        env:
+          - name: MODEL_PATH
+            value: "/mnt/models/model.joblib"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "512Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi"

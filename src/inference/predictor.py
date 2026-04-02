@@ -1,2 +1,41 @@
-# Production Trigger
-from fastapi import FastAPI, HTTPException import pandas as pd import joblib import os from prometheus_client import Counter, start_http_server  # ------------------------------ # Metrics (Prometheus) # ------------------------------ REQUEST_COUNT = Counter("prediction_requests_total", "Total prediction requests") ERROR_COUNT = Counter("prediction_errors_total", "Total prediction errors")  # Start metrics server (separate port) start_http_server(8000)  # ------------------------------ # FastAPI App # ------------------------------ app = FastAPI()  # ------------------------------ # Load Model (env driven) # ------------------------------ MODEL_PATH = os.getenv("MODEL_PATH", "models/model.joblib")  try:     model = joblib.load(MODEL_PATH) except Exception as e:     raise RuntimeError(f"❌ Model loading failed: {e}")   # ------------------------------ # Health Check # ------------------------------ @app.get("/health") def health():     return {"status": "ok"}   # ------------------------------ # Readiness Check # ------------------------------ @app.get("/ready") def ready():     if model:         return {"status": "ready"}     return {"status": "not_ready"}   # ------------------------------ # Prediction Endpoint # ------------------------------ @app.post("/predict") def predict(data: dict):     try:         REQUEST_COUNT.inc()          if "features" not in data:             raise ValueError("Missing 'features' key")          features = data["features"]          if not isinstance(features, list):             raise ValueError("Features must be a list")          df = pd.DataFrame([features])          prediction = model.predict(df)          return {"prediction": int(prediction[0])}      except Exception as e:         ERROR_COUNT.inc()         raise HTTPException(status_code=400, detail=str(e))
+import joblib
+import pandas as pd
+import os
+from fastapi import FastAPI, HTTPException
+
+app = FastAPI()
+
+# Model path matches the KServe volume mount
+MODEL_PATH = os.getenv("MODEL_PATH", "/mnt/models/model.joblib")
+model = None
+
+try:
+    if os.path.exists(MODEL_PATH):
+        model = joblib.load(MODEL_PATH)
+        print(f"✅ Model loaded successfully from {MODEL_PATH}")
+    else:
+        print(f"❌ Model file not found at {MODEL_PATH}")
+except Exception as e:
+    print(f"❌ Error loading model: {str(e)}")
+
+@app.get("/ready")
+def ready():
+    if model is not None:
+        return {"status": "ready"}
+    raise HTTPException(status_code=503, detail="Model not loaded")
+
+@app.post("/predict")
+def predict(data: dict):
+    try:
+        if "features" not in data:
+            raise ValueError("Missing 'features' key in request body")
+        
+        features = data["features"]
+        # Scikit-learn expects a DataFrame or 2D array
+        df = pd.DataFrame([features])
+        prediction = model.predict(df)
+        
+        return {"prediction": int(prediction[0])}
+    
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
