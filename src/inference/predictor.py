@@ -5,54 +5,74 @@ from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
 
-# ✅ Use environment variable (Docker sets this)
-MODEL_PATH = os.getenv("MODEL_PATH", "/app/model.joblib")
+# ✅ KServe standard: S3 models are mounted to /mnt/models
+# We use an absolute path to avoid the relative path errors seen in logs.
+MODEL_PATH = os.getenv("MODEL_PATH", "/mnt/models/model.joblib")
 
 model = None
 
 # ------------------------------
-# MODEL LOADING
+# MODEL LOADING (Executed at Startup)
 # ------------------------------
-print(f"🔍 Loading model from: {MODEL_PATH}")
+def load_model():
+    global model
+    print(f"🔍 Attempting to load model from: {MODEL_PATH}")
+    
+    try:
+        # Check if the file exists
+        if not os.path.exists(MODEL_PATH):
+            # PRO-TIP: List directory contents to debug "silly" path issues in logs
+            parent_dir = os.path.dirname(MODEL_PATH)
+            if os.path.exists(parent_dir):
+                print(f"📂 Contents of {parent_dir}: {os.listdir(parent_dir)}")
+            else:
+                print(f"⚠️ Parent directory {parent_dir} does not exist.")
+            
+            raise FileNotFoundError(f"Model file not found at {MODEL_PATH}")
 
-try:
-    if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError(f"Model not found at {MODEL_PATH}")
+        model = joblib.load(MODEL_PATH)
+        print("✅ Model loaded successfully into memory")
 
-    model = joblib.load(MODEL_PATH)
-    print("✅ Model loaded successfully")
+    except Exception as e:
+        print(f"❌ FATAL: Model loading failed: {str(e)}")
+        # In production, we want the container to crash if the model is missing
+        # so Kubernetes knows the pod is not healthy.
+        raise RuntimeError(f"Model loading failed: {e}")
 
-except Exception as e:
-    print(f"❌ FATAL: Model loading failed: {e}")
-    raise RuntimeError(f"Model loading failed: {e}")
-
+# Trigger loading
+load_model()
 
 # ------------------------------
-# READINESS ENDPOINT
+# KSERVE / KUBERNETES ENDPOINTS
 # ------------------------------
+
 @app.get("/ready")
+@app.get("/healthz") # Standard k8s health check path
 def ready():
+    """Confirms the container is up and model is in memory."""
     if model is not None:
         return {"status": "ready"}
     raise HTTPException(status_code=503, detail="Model not loaded")
 
 
-# ------------------------------
-# HEALTH CHECK (OPTIONAL BUT GOOD)
-# ------------------------------
 @app.get("/")
 def health():
-    return {"status": "ok"}
+    """Basic root check."""
+    return {"status": "ok", "model_path": MODEL_PATH}
 
 
 # ------------------------------
-# PREDICTION ENDPOINT
+# PREDICTION LOGIC
 # ------------------------------
+
 @app.post("/predict")
 def predict(data: dict):
+    """
+    Expects JSON: {"features": [val1, val2, ...]}
+    """
     try:
         if model is None:
-            raise RuntimeError("Model not loaded")
+            raise RuntimeError("Model is not initialized")
 
         if "features" not in data:
             raise ValueError("Missing 'features' key in request body")
@@ -60,15 +80,22 @@ def predict(data: dict):
         features = data["features"]
 
         if not isinstance(features, list):
-            raise ValueError("Features must be a list")
+            raise ValueError("Features must be a list of numerical values")
 
-        # Convert to DataFrame (sklearn expects 2D)
+        # Convert to DataFrame: Sklearn expects a 2D array-like input
         df = pd.DataFrame([features])
 
+        # Perform inference
         prediction = model.predict(df)
+        
+        # Log success for observability
+        print(f"✅ Prediction successful: {prediction[0]}")
 
-        return {"prediction": int(prediction[0])}
+        return {
+            "prediction": int(prediction[0]),
+            "status": "success"
+        }
 
     except Exception as e:
-        print(f"⚠️ Prediction error: {e}")
+        print(f"⚠️ Prediction error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
