@@ -28,7 +28,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 🛡️ 1. SNYK (Dependencies)
+      # ⚡ 1. CACHE PIP (Speeds up Snyk scan setup)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      # 🛡️ 2. SNYK (Dependencies)
       - name: Install Snyk CLI
         uses: snyk/actions/setup@v1
       - name: Snyk Security Scan
@@ -39,7 +46,7 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      # 🏗️ 2. CHECKOV (Dockerfile IaC)
+      # 🏗️ 3. CHECKOV (Dockerfile IaC)
       - name: Checkov IaC Scan
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -48,29 +55,39 @@ jobs:
           quiet: true
           skip_check: CKV_DOCKER_2,CKV_DOCKER_3
 
-      # 🔐 3. AWS OIDC AUTH
+      # 🔐 4. AWS OIDC AUTH
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/github-actions-role
           aws-region: ${{ env.AWS_REGION }}
 
-      # 🔑 4. LOGIN & BUILD
-      - name: Login to ECR
-        run: |
-          aws ecr get-login-password --region $AWS_REGION | docker login \
-          --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+      # 🔑 5. LOGIN TO ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ⚡ 6. SET UP DOCKER BUILDX (Required for Caching)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Set Image Tag
         id: vars
         run: echo "TAG=v1.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
 
-      - name: Build Image
-        run: |
-          docker build -f docker/inference.Dockerfile \
-            -t ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }} .
+      # 🐳 7. BUILD & PUSH WITH GITHUB ACTIONS CACHE
+      - name: Build and Push Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/inference.Dockerfile
+          push: true
+          tags: ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}:${{ steps.vars.outputs.TAG }}
+          # ⚡ Magic happens here:
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      # 🔍 5. TRIVY (Container Image Scan)
+      # 🔍 8. TRIVY (Container Image Scan)
       - name: Trivy Container Scan
         uses: aquasecurity/trivy-action@v0.20.0
         with:
@@ -81,15 +98,9 @@ jobs:
           vuln-type: os,library
           severity: CRITICAL,HIGH
 
-      # 🚀 6. PUSH
-      - name: Push Image
-        run: |
-          docker push ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }}
-
-      # 🎡 7. GITOPS UPDATE (For ArgoCD)
+      # 🎡 9. GITOPS UPDATE (For ArgoCD)
       - name: Update Manifest for ArgoCD
         run: |
-          # Updating the manifest in the apps folder that ArgoCD watches
           sed -i "s|image:.*|image: ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ steps.vars.outputs.TAG }}|g" infra/kubernetes/apps/inference-service.yaml
           
           git config --global user.name "github-actions[bot]"
