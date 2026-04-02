@@ -1,0 +1,31 @@
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: fraud-inference-runtime
+  namespace: default
+spec:
+  supportedModelFormats:
+    - name: sklearn
+      version: "1"
+  containers:
+    - name: kserve-container
+      image: 734367008253.dkr.ecr.ap-south-1.amazonaws.com/fraud-inference:v1.0.12
+      imagePullPolicy: Always
+      # --- THE BRUTE FORCE OVERRIDE ---
+      command: ["/bin/sh", "-c"]
+      args: 
+        - "mkdir -p /app/models && cp /mnt/models/model.joblib /app/models/model.joblib && uvicorn src.inference.predictor:app --host 0.0.0.0 --port 8080"
+      # --------------------------------
+      env:
+        - name: AWS_ROLE_ARN
+          value: "arn:aws:iam::734367008253:role/eksctl-fraud-mlops-cluster-addon-iamserviceac-Role1-lbe8cVSBINpS"
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+      resources:
+        limits:
+          cpu: "500m"
+          memory: "1Gi"
+        requests:
+          cpu: "50m"
+          memory: "256Mi"
